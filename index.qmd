@@ -157,7 +157,7 @@ Multilevel Solutions for Multilevel Problems!
 - They can be fit to data with many different levels, various kinds of grouping structures, and all kinds of relationships between variables.
 - There are three main types of MLMs - varying intercepts, varying slopes, and varying intercepts and slopes.
 
-![](man/figures/multilevel_data.webp){fig-align="center" width=80%} 
+![](man/figures/multilevel_data.webp){fig-align="center" width=60%} 
 
 ## Estimating Group Effects {.center}
 
