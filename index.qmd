@@ -1,0 +1,298 @@
+---
+title: "Introduction to Multilevel Regression"
+subtitle: "Moving Beyond Single-Level Models & Dealing With Clustering in Data"
+author: "Paul Johnson"
+---
+
+```{r}
+#| label: setup
+#| include: false
+
+# import packages
+suppressPackageStartupMessages({
+  library(dplyr)
+  library(ggplot2)
+  library(scales)
+  library(lme4)
+  library(gt)
+})
+
+# import data
+avocados <- 
+  readr::read_csv(here::here("data", "avocado.csv")) |> 
+  janitor::clean_names() |> 
+  select(-starts_with("x"), -ends_with("bags")) |> 
+  filter(
+    !region %in% c(
+      "California", "Midsouth", "Northeast", "Plains", 
+      "SouthCentral", "Southeast", "TotalUS", "West"
+      )
+    ) |> 
+  mutate(
+    organic = if_else(type == "organic", 1, 0),
+    type = if_else(type == "organic", "Organic", "Conventional")
+    )
+
+# set plot theme
+theme_set(scwplot::theme_scw(base_size = 10)) +
+  theme_update(
+    plot.title = element_text(margin = margin(b = 5)),
+    legend.text = element_text(colour = "#5D5F5F", size = rel(.8)),
+    legend.key.width = unit(.75, "cm"),
+    plot.margin = margin(c(t = .5, r = 0, b = .5, l = .5), unit = "cm")
+  )
+```
+
+# What is Multilevel Data? {data-background-color="#425563" data-verticator="#E8EDEE"}
+
+Understanding Grouping Structures in Data
+
+## Multilevel Data is Everywhere {.center}
+
+- Typical regression methods assume a flat single-level data structure, which does not account for the complexity that we often find in real-world data.
+  - This means that single-level regression methods assume that all observations are independent of each other.
+- It is very common to find that there are "grouping structures" in your data. This is multilevel data!
+- Multilevel data is so common that our starting assumption should be that any data has grouping structures that need to be accounted for [@mcelreath2017].
+- Whenever you have multiple measurements per group, across many grouping units, you have multilevel data [@thieu2020]!
+
+## Many Sources of Clustering {.center}
+
+- Multilevel data can take lots of different forms, some more obvious than others.
+- The most intuitive (and probably most common) type of grouping structure is hierarchical.  
+  - Observations are clustered based on some higher-level grouping. Some common examples include countries, cities, and school classes.
+- Not all grouping structures are hierarchical. Data can also cluster at the observation-level.
+  - Characteristics like gender, ethnicity, or social class, can lead to clustering.
+  - Another very common form of observation-level grouping is "repeated measurements".
+- Observations within groups that are more similar to each other than to observations in other groups indicate a multilevel problem.
+
+## Population-Level Grouping Structures {.center}
+
+```{r}
+#| label: avocado-sales
+
+avocados |> 
+  ggplot(aes(log(total_volume), fill = type)) +
+  geom_histogram(position = "identity", alpha = 0.5) +
+  labs(x = "Total Volume", y = NULL) +
+  scwplot::scale_fill_qualitative(palette = "scw") 
+```
+
+## Hierarchical Grouping Structures {.center}
+
+```{r}
+#| label: avocado-sales-by-region
+
+avocados |> 
+  filter(region %in% c("Houston", "Seattle", "Syracuse")) |> 
+  ggplot(aes(log(total_volume), fill = type)) +
+  geom_histogram(position = "identity", alpha = 0.5) +
+  facet_wrap(~ region, nrow = 3) +
+  labs(x = "Total Volume", y = NULL) +
+  scwplot::scale_fill_qualitative(palette = "scw") 
+```
+
+## Hierarchical Grouping Structures {.center}
+
+```{r}
+#| label: avocado-types
+
+avocados |> 
+  filter(region %in% c("Houston", "Seattle", "Syracuse")) |> 
+  ggplot(aes(average_price, log(total_volume), colour = region)) +
+  geom_point(alpha = 0.5) +
+  geom_smooth(method = lm, se = FALSE) +
+  facet_wrap(~ type) +
+  labs(x = "Average Price", y = "Total Volume") +
+  scwplot::scale_colour_qualitative(palette = "scw") 
+```
+
+# Multilevel Problems {data-background-color="#425563" data-verticator="#E8EDEE"}
+
+Issues with Using Single-Level Models for Multilevel Problems
+
+## Why Does it Matter? {.center}
+
+- When you have multilevel data, it is necessary to think about variance _within groups_ and _between groups_.
+  - Observations _within groups_ are often more alike than observations _between groups_.
+- Single-level regression models do not account for the complexity of multilevel data, either ignoring it entirely (complete pooling) or treating groups as independent (no pooling).
+- Failure to account for grouping structures in data can violate assumptions and bias estimates.
+
+## Assumption of Independence {.center}
+
+- The independence assumption is one of the four assumptions of linear regression.
+- It assumes that your residuals are all independent - observations (and their residuals) should not be correlated.
+- When there is clustering among observations, this violates the independence assumption.
+- This is the worst assumption to violate! 
+  - Artificially inflates probability estimates.
+  - Creates the appearance of certainty where it does not exist.
+
+## Simpson's Paradox {.center}
+
+```{r}
+#| label: simpsons-paradox
+
+datasauRus::simpsons_paradox |> 
+  ggplot(aes(x = x, y = y, colour = dataset)) +
+  geom_point() +
+  geom_smooth(method = lm, se = FALSE) +
+  facet_wrap(~ dataset, nrow = 2) +
+  scwplot::scale_colour_qualitative(palette = "scw")
+```
+
+# Multilevel Regression {data-background-color="#425563" data-verticator="#E8EDEE"}
+
+Multilevel Solutions for Multilevel Problems!
+
+## What is Multilevel Regression? {.center}
+
+- Single-level models treat clusters as unrelated to others, forgetting everything they've learned from each cluster. If the clusters are of the same type, this is leaving valuable information on the table [@mcelreath2017].
+  - Multilevel models (MLMs) remember features of each cluster in the data as they learn about all of the clusters [@mcelreath2018].
+  - Pooling information across groups/clusters helps improve estimates about each group/cluster.
+- MLMs allow us to fit regression models to individual level while accounting for systematic unexplained variation among groups [@gelman2006].
+- MLMs are appropriate when you care about group differences, when you have many groups, and when there are imbalances among groups.
+
+## Multilevel Regression Types {.center}
+
+- MLMs are very flexible, and can be fit to many different types of multilevel data.
+- They can be fit to data with many different levels, various kinds of grouping structures, and all kinds of relationships between variables.
+- There are three main types of MLMs - varying intercepts, varying slopes, and varying intercepts and slopes.
+
+![](man/figures/multilevel_data.webp){fig-align="center" width=80%} 
+
+## Estimating Group Effects {.center}
+
+- We can build a "null model" to examine how much of the variance in the data can be explained by the grouping structure.
+
+```{r}
+#| label: null-model
+ 
+lmer(total_volume ~ 1 + (1 | region), data = avocados) |> 
+  performance::icc() |> 
+  janitor::clean_names(replace = c("ICC" = ""), "title") |>
+  tidyr::pivot_longer(everything(), names_to = "ICC", values_to = "Value") |>
+  gt() |>
+  tab_header("Intraclass Correlation Coefficient (ICC)") |>
+  fmt_number(columns = is.numeric, decimals = 2) |>
+  tab_options(table.width = pct(100))
+```
+
+## Varying Intercepts {.center}
+
+- Varying intercepts are the most common type of multilevel model (and the easiest to understand).
+- Instead of fitting a model that pools all information about groups and fits a single line to the data, it fits a line to each group.
+- We are estimating the model but letting each group have a different value at 0.
+
+## Varying Intercepts {.center}
+
+```{r}
+#| label: coef-map
+#| include: false
+
+cm <-
+  c(
+    "(Intercept)" = "(Intercept)",
+    "average_price" = "Average Price",
+    "organic" = "Organic",
+    "SD (Intercept region)" = "Region Intercept Variance",
+    "SD (Observations)" = "Residual Variance"
+  )
+```
+
+```{r}
+#| label: varying-intercepts
+
+varying_intercepts <-       
+  lmer(
+    log(total_volume) ~ average_price + organic + (1 | region), 
+    data = avocados
+    )
+
+modelsummary::msummary(
+  list("Total Volume" = varying_intercepts),
+  statistic = 'conf.int', coef_map = cm, gof_omit = "AIC|BIC|R2", 
+  fmt = 2, exponentiate = TRUE, output = "gt",
+  title = "Multilevel Regression of Avocado Sales"
+  ) |>
+  tab_row_group(md("**Group Effects**"), rows = 7:8) |>
+  tab_row_group(md("**Population Effects**"), rows = 1:6) |>
+  tab_style(
+    style = cell_text(size = "x-small"), 
+    locations = cells_body(columns = 2, rows = c(2, 4, 6))
+  ) |> 
+  tab_options(table.width = pct(100), table.font.size = 12)
+```
+
+## Varying Intercepts {.center}
+
+```{r}
+#| label: population-effects
+
+varying_intercepts |> 
+  ggeffects::predict_response(c("average_price", "organic")) |> 
+  tibble() |> 
+  mutate(type = if_else(group == 0, "Conventional", "Organic")) |> 
+  ggplot(aes(x, predicted, group = type, colour = type)) +
+  geom_point(size = 1.5) +
+  geom_line(linewidth = 1) +
+  geom_line(aes(y = conf.low), linetype = 2) +
+  geom_line(aes(y = conf.high), linetype = 2) +
+  scale_x_continuous(labels = label_currency()) +
+  scale_y_continuous(
+    labels = label_number(scale_cut = cut_short_scale())
+    ) +
+  labs(x = "Average Price", y = "Total Volume") +
+  scwplot::scale_colour_qualitative("scw")
+```
+
+## Varying Intercepts {.center}
+
+```{r}
+#| label: group-effects
+
+varying_intercepts |> 
+  ggeffects::predict_response(
+    c("average_price", "organic", "region"), type = "random"
+    ) |>
+  tibble() |> 
+  filter(facet %in% c("Houston", "Seattle", "Syracuse")) |> 
+  mutate(type = if_else(group == 0, "Conventional", "Organic")) |>
+  ggplot(aes(x, predicted, group = type, colour = type)) +
+  geom_point(size = 1.5) +
+  geom_line(linewidth = 1) +
+  geom_line(aes(y = conf.low), linetype = 2) +
+  geom_line(aes(y = conf.high), linetype = 2) +
+  facet_wrap(facets = vars(facet), nrow = 3) +
+  scale_x_continuous(labels = label_currency()) +
+  scale_y_continuous(
+    labels = label_number(scale_cut = cut_short_scale())
+    ) +
+  labs(x = "Average Price", y = "Total Volume") +
+  scwplot::scale_colour_qualitative("scw")
+```
+
+## Conclusion {.center}
+
+- Multilevel data is very common, and we should start by assuming our data has grouping structures in it.
+- Not accounting for those grouping structures can cause a lot of problems.
+- Multilevel regression is flexible, powerful, and incredibly effective!
+
+# Thank You!
+
+Contact:
+<br>
+
+<ul >
+{{< fa solid envelope >}} [paul.johnson50@nhs.net](mailto: paul.johnson50@nhs.net)
+</ul>
+
+
+Code & Slides:
+<br>
+
+<ul >
+{{< fa brands github >}}[/NHS-South-Central-and-West/handling-missing-values](https://github.com/nhs-south-central-and-west/handling-missing-values)
+</ul>
+
+## References
+
+
